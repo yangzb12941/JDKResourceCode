@@ -433,6 +433,8 @@ public class HashMap<K,V> extends AbstractMap<K,V>
 
     /**
      * hashMap 核心put操作
+     * onlyIfAbsent 参数，默认为false, 表明若是存在相同的节点，则更新值；
+     * 若是true 则表明相同节点不更新值
      */
     final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
                    boolean evict) {
@@ -443,19 +445,29 @@ public class HashMap<K,V> extends AbstractMap<K,V>
         if ((tab = table) == null || (n = tab.length) == 0)
             //进入resize方法
             n = (tab = resize()).length;
+        //tab[i = (n - 1) & hash],其中的(n - 1) & hash 就是取余hash%n
+        //当前桶位置是空
         if ((p = tab[i = (n - 1) & hash]) == null)
+            //新建一个node放在对应的i位置上。
             tab[i] = newNode(hash, key, value, null);
         else {
+            //对应位置上有值，则直接判断是否为相同的node
             java.util.HashMap.Node<K,V> e; K k;
             if (p.hash == hash &&
                     ((k = p.key) == key || (key != null && key.equals(k))))
                 e = p;
+            //如果是红黑树节点，则放入树中。
             else if (p instanceof java.util.HashMap.TreeNode)
                 e = ((java.util.HashMap.TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
             else {
                 for (int binCount = 0; ; ++binCount) {
                     if ((e = p.next) == null) {
+                        //hash碰撞之后，1.8 采用尾插法在链中加入新数据；而1.7是采用头插法；
+                        //为什么呢？
+                        //因为头插法在多线程扩容的情况下，有可能会导致形成环，这样就造成线程死循环。
+                        //而尾插法能避免这种问题。
                         p.next = newNode(hash, key, value, null);
+
                         if (binCount >= TREEIFY_THRESHOLD - 1) // -1 for 1st
                             treeifyBin(tab, hash);
                         break;
@@ -470,11 +482,14 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                 V oldValue = e.value;
                 if (!onlyIfAbsent || oldValue == null)
                     e.value = value;
+                //空方法，节点访问之后的处理，这个在LinkHashMap中有实现。
                 afterNodeAccess(e);
                 return oldValue;
             }
         }
+        //hashMap结构被改变需要加1，用在容器的快速失败
         ++modCount;
+        //当前的
         if (++size > threshold)
             resize();
         afterNodeInsertion(evict);
@@ -544,7 +559,10 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                         //直接把元素rehash到新的同数组中
                         newTab[e.hash & (newCap - 1)] = e;
                     else if (e instanceof java.util.HashMap.TreeNode)
-                        //若当前节点是树节点，参数this 是当前hashMap对象；重新映射时，需要对红黑树进行拆分
+                        //在rehash过程中，若是某个桶的节点是树节点结构，则需要进行特殊处理：
+                        //①、整颗红黑树被拆解为两个双向链表，高位和低位双向链表；
+                        //②、判断两个双向链表的元素个数是否大于6，若是则再形成新的红黑树；
+                        // 否则拆解为普通的链表结构
                         ((java.util.HashMap.TreeNode<K,V>)e).split(this, newTab, j, oldCap);
                     else { // preserve order
                         java.util.HashMap.Node<K,V> loHead = null, loTail = null;
@@ -552,6 +570,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                         java.util.HashMap.Node<K,V> next;
                         do {
                             next = e.next;
+                            //把旧hash链拆解为高位和低位链
                             if ((e.hash & oldCap) == 0) {
                                 if (loTail == null)
                                     loHead = e;
@@ -567,10 +586,12 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                                 hiTail = e;
                             }
                         } while ((e = next) != null);
+                        //低位链还是在原 桶位置
                         if (loTail != null) {
                             loTail.next = null;
                             newTab[j] = loHead;
                         }
+                        //高位链在原桶位置+旧hash容量(因为hash扩容是2幂次方增长)
                         if (hiTail != null) {
                             hiTail.next = null;
                             newTab[j + oldCap] = hiHead;
@@ -589,6 +610,8 @@ public class HashMap<K,V> extends AbstractMap<K,V>
      */
     final void treeifyBin(java.util.HashMap.Node<K,V>[] tab, int hash) {
         int n, index; java.util.HashMap.Node<K,V> e;
+        //当一个链的长度为8时，且桶的个数大于64，那么就把链转换成红黑树
+        //若桶的数量没有达到64个，那么只进行扩容处理
         if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY)
             resize();
         else if ((e = tab[index = (n - 1) & hash]) != null) {
@@ -603,7 +626,11 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                 }
                 tl = p;
             } while ((e = e.next) != null);
+            //上面的逻辑是把普通节点转换成红黑树节点，并且形成双向链表，
+            //这个双向链表的指向关系在转化成树时还是保留的。
+            //这样有利于在rehash的过程中遍历整颗树。
             if ((tab[index] = hd) != null)
+                //把上面的双向链表转化成红黑树
                 hd.treeify(tab);
         }
     }
@@ -672,13 +699,17 @@ public class HashMap<K,V> extends AbstractMap<K,V>
             if (node != null && (!matchValue || (v = node.value) == value ||
                     (value != null && value.equals(v)))) {
                 if (node instanceof java.util.HashMap.TreeNode)
+                    //自己把自己从树节点移除
                     ((java.util.HashMap.TreeNode<K,V>)node).removeTreeNode(this, tab, movable);
                 else if (node == p)
+                    //桶的第一个元素，next可以是null
                     tab[index] = node.next;
                 else
+                    //链中元素
                     p.next = node.next;
                 ++modCount;
                 --size;
+                //移除元素的后续操作，目前是空方法
                 afterNodeRemoval(node);
                 return node;
             }
@@ -696,6 +727,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
         if ((tab = table) != null && size > 0) {
             size = 0;
             for (int i = 0; i < tab.length; ++i)
+                //清理，只需要把桶中的元素赋值为null，其他的就交给垃圾回收器了
                 tab[i] = null;
         }
     }
@@ -712,6 +744,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
         java.util.HashMap.Node<K,V>[] tab; V v;
         if ((tab = table) != null && size > 0) {
             for (int i = 0; i < tab.length; ++i) {
+                //因为红黑树结构也保留双向链表的结构，所以可以直接通过next迭代查找
                 for (java.util.HashMap.Node<K,V> e = tab[i]; e != null; e = e.next) {
                     if ((v = e.value) == value ||
                             (value != null && value.equals(v)))
@@ -1657,6 +1690,10 @@ public class HashMap<K,V> extends AbstractMap<K,V>
 
         /**
          * Ensures that the given root is the first node of its bin.
+         * 为什么还要保留双向链表结构呢？单向链表不行吗？
+         * 在resize()拆分红黑树的时候，需要通过双向链表结构快速遍历树节点的所有元素。
+         * 在调整成红黑树之后，还需要把树的根节点放到对应的桶位置，并且把根结点调整为双向
+         * 链表的头节点，若是没有双向链表结构，那么把根节点变更为双向链表的头节点就不能在O(1)的时间复杂度完成。
          */
         static <K,V> void moveRootToFront(java.util.HashMap.Node<K,V>[] tab, java.util.HashMap.TreeNode<K,V> root) {
             int n;
@@ -1742,9 +1779,11 @@ public class HashMap<K,V> extends AbstractMap<K,V>
          */
         final void treeify(java.util.HashMap.Node<K,V>[] tab) {
             java.util.HashMap.TreeNode<K,V> root = null;
+            //this 就是头节点
             for (java.util.HashMap.TreeNode<K,V> x = this, next; x != null; x = next) {
                 next = (java.util.HashMap.TreeNode<K,V>)x.next;
                 x.left = x.right = null;
+                //红黑树的头节点是黑色的。
                 if (root == null) {
                     x.parent = null;
                     x.red = false;
@@ -1800,7 +1839,8 @@ public class HashMap<K,V> extends AbstractMap<K,V>
         }
 
         /**
-         * Tree version of putVal.
+         * 以下的逻辑就是：把新加的节点插入红黑树中，是按顺序加入的。并且在插入树节点的地方
+         * 也会加入一个双向链表中(直接与父节点形成双向链表)
          */
         final java.util.HashMap.TreeNode<K,V> putTreeVal(java.util.HashMap<K,V> map, java.util.HashMap.Node<K,V>[] tab,
                                                          int h, K k, V v) {
@@ -1808,6 +1848,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
             boolean searched = false;
             java.util.HashMap.TreeNode<K,V> root = (parent != null) ? root() : this;
             for (java.util.HashMap.TreeNode<K,V> p = root;;) {
+                //dir 保存tree节点之间key的大小比较
                 int dir, ph; K pk;
                 if ((ph = p.hash) > h)
                     dir = -1;
@@ -1827,6 +1868,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                                         (q = ch.find(h, k, kc)) != null))
                             return q;
                     }
+                    //若是key不能比较，那么直接采用默认的比较方式
                     dir = tieBreakOrder(k, pk);
                 }
 
@@ -1959,13 +2001,26 @@ public class HashMap<K,V> extends AbstractMap<K,V>
         final void split(java.util.HashMap<K,V> map, java.util.HashMap.Node<K,V>[] tab, int index, int bit) {
             //当前Tree节点对象
             java.util.HashMap.TreeNode<K,V> b = this;
+            //重新连接到低和高的名单，维持秩序
             // Relink into lo and hi lists, preserving order
             java.util.HashMap.TreeNode<K,V> loHead = null, loTail = null;
             java.util.HashMap.TreeNode<K,V> hiHead = null, hiTail = null;
             int lc = 0, hc = 0;
+            //由于在链超过8个数据时，先传化成双向链表->然后再转化为红黑树，此时双向链表的指向关系还是保留的。
+            //此处就是通过双向链表的结构遍历红黑树。并且红黑树中添加节点的时候，也会维护双向链表指向关系。
             for (java.util.HashMap.TreeNode<K,V> e = b, next; e != null; e = next) {
                 next = (java.util.HashMap.TreeNode<K,V>)e.next;
                 e.next = null;
+                //这里的e.hash & bit(旧hashMap的oldCap【length】)是什么用意呢？
+                //JDK1.7中，resize时，index取得时，全部采用重新hash的方式进行了。JDK1.8对这个进行了改善。
+                //
+                //以前要确定index的时候用的是(e.hash & oldCap-1)，是取模取余，而这里用到的是(e.hash & oldCap)，它有两种结果，一个是0，一个是oldCap，
+                //
+                //比如oldCap=8,hash是3，11，19，27时，(e.hash & oldCap)的结果是0，8，0，8，这样3，19组成新的链表，index为3；而11，27组成新的链表，新分配的index为3+8；
+                //
+                //JDK1.7中重写hash是(e.hash & newCap-1)，也就是3，11，19，27对16取余，也是3，11，3，11，和上面的结果一样，但是index为3的链表是19，3，index为3+8的链表是
+                //
+                //27，11，也就是说1.7中经过resize后数据的顺序变成了倒叙，而1.8没有改变顺序。
                 if ((e.hash & bit) == 0) {
                     if ((e.prev = loTail) == null)
                         loHead = e;
@@ -1983,13 +2038,23 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                     ++hc;
                 }
             }
+            //红黑树在重新rehash后，会分为两个链表，一个是在原位置的链表(低位链表)，一个是原位置+oldCap 位置的链表(高位链表)
+            // 此时的树结构还是保留，重新构建双向链表结构。
 
+            //为什么要把红黑树拆解呢？
+            //①、红黑树的结构是为了解决长链表的线性查找效率为问题。
+            //②、当rehash之后，链表长度不长的情况下，红黑树带来的查找性能不明显，反而加大了红黑树插入节点的复杂性。
+            //③、一个红黑树节点占用的内存比一般的节点要大。红黑树节点多了四个引用(父节点、左孩子、右孩子、双向链表中的前向引用)
             if (loHead != null) {
+                //低位链表 长度小于6，则需要转化为链表式结构
                 if (lc <= UNTREEIFY_THRESHOLD)
+                    //把红黑树拆解
                     tab[index] = loHead.untreeify(map);
                 else {
+                    //否则仍然保留红黑树结构
                     tab[index] = loHead;
                     if (hiHead != null) // (else is already treeified)
+                        //用低位链表重新构建新的红黑树
                         loHead.treeify(tab);
                 }
             }
@@ -2006,7 +2071,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
 
         /* ------------------------------------------------------------ */
         // Red-black tree methods, all adapted from CLR
-
+        //红黑树调整的 左旋操作
         static <K,V> java.util.HashMap.TreeNode<K,V> rotateLeft(java.util.HashMap.TreeNode<K,V> root,
                                                                 java.util.HashMap.TreeNode<K,V> p) {
             java.util.HashMap.TreeNode<K,V> r, pp, rl;
@@ -2024,7 +2089,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
             }
             return root;
         }
-
+        //红黑树调整的 右旋操作
         static <K,V> java.util.HashMap.TreeNode<K,V> rotateRight(java.util.HashMap.TreeNode<K,V> root,
                                                                  java.util.HashMap.TreeNode<K,V> p) {
             java.util.HashMap.TreeNode<K,V> l, pp, lr;
@@ -2042,7 +2107,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
             }
             return root;
         }
-
+        //添加节点之后调整红黑树平衡
         static <K,V> java.util.HashMap.TreeNode<K,V> balanceInsertion(java.util.HashMap.TreeNode<K,V> root,
                                                                       java.util.HashMap.TreeNode<K,V> x) {
             x.red = true;
@@ -2097,7 +2162,7 @@ public class HashMap<K,V> extends AbstractMap<K,V>
                 }
             }
         }
-
+        //删除节点之后调整红黑树平衡
         static <K,V> java.util.HashMap.TreeNode<K,V> balanceDeletion(java.util.HashMap.TreeNode<K,V> root,
                                                                      java.util.HashMap.TreeNode<K,V> x) {
             for (java.util.HashMap.TreeNode<K,V> xp, xpl, xpr;;)  {

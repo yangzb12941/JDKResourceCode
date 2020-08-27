@@ -523,10 +523,12 @@ public class ThreadLocal<T> {
             int len = tab.length;
             Entry e;
 
-            // Back up to check for prior stale entry in current run.
-            // We clean out whole runs at a time to avoid continual
-            // incremental rehashing due to garbage collector freeing
-            // up refs in bunches (i.e., whenever the collector runs).
+            //备份以检查当前运行中以前的过时条目。
+            //我们一次清理整个跑步路线，以避免连续不断
+            //垃圾回收器释放导致的增量重新灰化
+            //以束的形式向上引用（即，每当收集器运行时）。
+
+            //这个主要是向前扫描连续的entity，如果有被回收的弱引用，则记录最前面的下标
             int slotToExpunge = staleSlot;
             for (int i = prevIndex(staleSlot, len);
                  (e = tab[i]) != null;
@@ -536,6 +538,9 @@ public class ThreadLocal<T> {
 
             // Find either the key or trailing null slot of run, whichever
             // occurs first
+            //查找run的键或尾随的空槽，以先发生的为准
+
+            //向后扫描连续不为null的entity,如果找到目标key就替换
             for (int i = nextIndex(staleSlot, len);
                  (e = tab[i]) != null;
                  i = nextIndex(i, len)) {
@@ -546,6 +551,11 @@ public class ThreadLocal<T> {
                 // The newly stale slot, or any other stale slot
                 // encountered above it, can then be sent to expungeStaleEntry
                 // to remove or rehash all of the other entries in run.
+                //如果找到密钥，则需要交换密钥
+                //与陈旧的条目保持哈希表的顺序。
+                //新失效的插槽，或任何其他失效的插槽
+                //遇到上面的错误，可以将其发送到expungeStaleEntry
+                //删除或重新哈希运行中的所有其他条目。
                 if (k == key) {
                     e.value = value;
 
@@ -553,6 +563,7 @@ public class ThreadLocal<T> {
                     tab[staleSlot] = e;
 
                     // Start expunge at preceding stale entry if it exists
+                    //在前面的过时条目处开始清除（如果存在）
                     if (slotToExpunge == staleSlot)
                         slotToExpunge = i;
                     cleanSomeSlots(expungeStaleEntry(slotToExpunge), len);
@@ -562,15 +573,20 @@ public class ThreadLocal<T> {
                 // If we didn't find stale entry on backward scan, the
                 // first stale entry seen while scanning for key is the
                 // first still present in the run.
+
+                //往前扫描没找到其他过期的key值
                 if (k == null && slotToExpunge == staleSlot)
                     slotToExpunge = i;
             }
 
             // If key not found, put new entry in stale slot
+            // 如果找不到密钥，请将新条目放入过时的槽中
+            //刚开始看的时候会质疑这里，因为有可能存在同样key的entity在后面，但是结合整个清理扫描的过程可以确保不会出现这样的情况。
             tab[staleSlot].value = null;
             tab[staleSlot] = new Entry(key, value);
 
             // If there are any other stale entries in run, expunge them
+            //如果运行中有任何其他过时的条目，请删除它们
             if (slotToExpunge != staleSlot)
                 cleanSomeSlots(expungeStaleEntry(slotToExpunge), len);
         }
@@ -580,7 +596,8 @@ public class ThreadLocal<T> {
          * lying between staleSlot and the next null slot.  This also expunges
          * any other stale entries encountered before the trailing null.  See
          * Knuth, Section 6.4
-         *
+         *通过重新整理位于staleSlot和下一个null slot之间的任何可能发生冲突的条目来清除过时条目。
+         * 这还将删除在尾随的null之前遇到的任何其他过时条目。见Knuth，第6.4节
          * @param staleSlot index of slot known to have null key
          * @return the index of the next null slot after staleSlot
          * (all between staleSlot and this slot will have been checked
@@ -630,6 +647,10 @@ public class ThreadLocal<T> {
          * scanning (fast but retains garbage) and a number of scans
          * proportional to number of elements, that would find all
          * garbage but would cause some insertions to take O(n) time.
+         *
+         * 试探性地扫描一些单元格，寻找过时的条目。当添加新元素或删除另一个过时元素时，将调用此函数。
+         * 它执行对数扫描次数，作为不扫描（快速但保留垃圾）和与元素数量成比例的扫描次数之间的平衡，
+         * 这将找到所有垃圾，但会导致一些插入花费O（n）时间。
          *
          * @param i a position known NOT to hold a stale entry. The
          * scan starts at the element after i.

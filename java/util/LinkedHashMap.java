@@ -1,28 +1,3 @@
-/*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
- * ORACLE PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- */
-
 package java.util;
 
 import java.util.function.Consumer;
@@ -31,6 +6,42 @@ import java.util.function.BiFunction;
 import java.io.IOException;
 
 /**
+ * Map接口的哈希表和链表实现，具有可预测的迭代顺序。此实现与HashMap的不同之处在于，它维护一个贯穿其所有条目的双向链接列表。
+ * 此链表定义了迭代顺序，通常是将键插入映射的顺序（插入顺序）。请注意，如果将密钥重新插入到映射中，则插入顺序不会受到影响。
+ * （如果在调用之前m.containsKey（k）将立即返回true，则调用m.put（k，v）时，将密钥k重新插入到映射m中。）
+ * 此实现使客户免于HashMap（和Hashtable）提供的未指定的，通常混乱的排序，而不会增加与TreeMap相关的成本。无论原始地图的实现如何，
+ * 都可以使用它来生成与原始地图具有相同顺序的地图副本：
+ *        void foo（Map m）{
+ *            地图副本=新的LinkedHashMap（m）;
+ *            ...
+ *        }
+ *
+ * 如果模块在输入上获取映射，将其复制，然后返回其结果由复制的顺序确定的结果，则此技术特别有用。 （客户通常喜欢按退货的顺序退货。）
+ * 提供了一个特殊的构造函数来创建链接的哈希映射，其迭代顺序是其条目的最后访问顺序（从最近的访问到最近的访问）（访问顺序）。
+ * 这种映射非常适合构建LRU缓存。调用put，putIfAbsent，get，getOrDefault，compute，computeIfAbsent，computeIfPresent或merge
+ * 方法将导致对相应条目的访问（假定调用完成后该条目存在）。如果替换值，则replace方法仅导致对条目的访问。 putAll方法为指定映射中
+ * 的每个映射生成一个条目访问，其顺序为指定映射的条目集迭代器提供键-值映射。没有其他方法可以生成条目访问。特别是，对集合视图的操作
+ * 不会影响支持映射的迭代顺序。
+ * 可以重写removeEldestEntry（Map.Entry）方法，以强加一个策略，以便在将新映射添加到地图时自动删除陈旧的映射。
+ * 此类提供所有可选的Map操作，并允许空元素。像HashMap一样，它为基本操作（添加，包含和删除）提供恒定时间的性能，
+ * 假设哈希函数将元素正确地分布在存储桶中。由于维护链表的开销增加，因此性能可能会略低于HashMap，但有一个例外：对LinkedHashMap
+ * 的集合视图进行迭代需要的时间与地图的大小成正比，而无论其容量如何。在HashMap上进行迭代可能会更昂贵，需要的时间与其容量成正比。
+ * 链接的哈希映射具有两个影响其性能的参数：初始容量和负载因子。它们的定义与HashMap一样。但是请注意，与HashMap相比，此类为初始
+ * 容量选择过高的值的惩罚不那么严重，因为此类的迭代时间不受容量的影响。
+ * 请注意，此实现未同步。如果多个线程同时访问链接的哈希映射，并且至少有一个线程在结构上修改该映射，则必须在外部进行同步。通常，
+ * 通过在自然封装地图的某个对象上进行同步来实现。如果不存在这样的对象，则应使用Collections.synchronizedMap方法“包装”地图。
+ * 最好在创建时完成此操作，以防止意外不同步地访问地图：
+ *      地图m = Collections.synchronizedMap（new LinkedHashMap（...））;
+ * 结构修改是添加或删除一个或多个映射的任何操作，或者在访问排序的链接哈希映射的情况下，会影响迭代顺序。在插入顺序链接的哈希表中，
+ * 仅更改与映射中已包含的键关联的值不是结构上的修改。在访问顺序链接的哈希映射中，仅使用get查询该映射是结构上的修改。 ）
+ * 所有此类的所有collection视图方法返回的collection的iterator方法返回的迭代器都是快速失败的：如果在创建迭代器后的任何时间对
+ * 地图进行结构修改，则除了通过迭代器自己的remove方法之外，迭代器将抛出ConcurrentModificationException。因此，面对并发修改，
+ * 迭代器将快速而干净地失败，而不是冒着在未来不确定的时间冒任意，不确定行为的风险。
+ * 注意，不能保证迭代器的快速失败行为，因为通常来说，在存在不同步的并发修改的情况下，不可能做出任何严格的保证。快速失败的迭代器会
+ * 尽最大努力抛出ConcurrentModificationException。因此，编写依赖于此异常的程序的正确性是错误的：迭代器的快速失败行为应仅用于
+ * 检测错误。
+ * 由此类的所有集合视图方法返回的集合的spliterator方法返回的分隔器为后期绑定，故障快速且另外报告Spliterator.ORDERED。
+ * 此类是Java Collections Framework的成员。
  * <p>Hash table and linked list implementation of the <tt>Map</tt> interface,
  * with predictable iteration order.  This implementation differs from
  * <tt>HashMap</tt> in that it maintains a doubly-linked list running through
@@ -166,6 +177,24 @@ public class LinkedHashMap<K,V>
 {
 
     /*
+     *实施说明。该课程的先前版本是
+     *内部结构略有不同。因为超一流
+     * HashMap现在将树用于其某些节点，类
+     * LinkedHashMap.Entry现在被视为中间节点类
+     *也可以转换为树形式。这个的名字
+     *类LinkedHashMap.Entry在其几种方式上令人困惑
+     *当前上下文，但不能更改。否则，即使
+     *它未导出到此软件包外部，某些现有来源
+     *已知代码依赖于符号解析的小写字母
+     *禁止删除编译的removeEldestEntry调用规则
+     *由于用法不正确而导致的错误。因此，我们将名称保留为
+     *保留未修改的可编译性。
+     *
+     *节点类的更改还需要使用两个字段
+     *（头，尾）而不是指向要维护的头节点的指针
+     *双向链接的前后列表。这个课也
+     *以前使用了不同风格的回调方法
+     *访问，插入和删除。
      * Implementation note.  A previous version of this class was
      * internally structured a little differently. Because superclass
      * HashMap now uses trees for some of its nodes, class
@@ -465,6 +494,18 @@ public class LinkedHashMap<K,V>
     }
 
     /**
+     * 如果此映射应删除其最旧的条目，则返回true。在将新条目插入到映射后，由put和putAll调用此方法。每次添加新条目时，
+     * 它为实施者提供了删除最旧条目的机会。如果该映射表示一个高速缓存，这将很有用：它允许该映射通过删除陈旧的条目来减少内存消耗。
+     * 使用示例：此覆盖将使地图最多可以容纳100个条目，然后每次添加新条目时都会删除最旧的条目，从而保持100个条目的稳定状态。
+     *            私有静态最终int MAX_ENTRIES = 100;
+     *
+     *            受保护的布尔值removeEldestEntry（Map.Entry eldest）{
+     *               返回size（）> MAX_ENTRIES;
+     *            }
+     *
+     * 此方法通常不以任何方式修改映射，而是允许映射按照其返回值的指示修改自身。可以使用此方法直接修改地图，但如果这样做，
+     * 则必须返回false（指示该地图不应尝试任何进一步的修改）。未指定从此方法修改映射后返回true的效果。
+     * 此实现仅返回false（因此，此映射的行为类似于普通映射-永远不会删除最老的元素）。
      * Returns <tt>true</tt> if this map should remove its eldest entry.
      * This method is invoked by <tt>put</tt> and <tt>putAll</tt> after
      * inserting a new entry into the map.  It provides the implementor
